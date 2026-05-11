@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: quiz_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quiz}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quizpass}
+      POSTGRES_DB: ${POSTGRES_DB:-quizdb}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - quiz_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quiz} -d ${POSTGRES_DB:-quizdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quiz_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-quiz}:${POSTGRES_PASSWORD:-quizpass}@db:5432/${POSTGRES_DB:-quizdb}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+
+volumes:
+  quiz_pgdata:
