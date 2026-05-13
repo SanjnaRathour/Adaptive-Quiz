@@ -1,17 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { api } from "../api";
 import type { NotificationRead, PaginatedNotifications } from "../api";
-import { useAuth } from "../auth";
 
 const PREVIEW_COUNT = 5;
 
 export function NotificationBell() {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -53,13 +50,6 @@ export function NotificationBell() {
   const handleClickItem = (n: NotificationRead) => {
     if (n.read_at === null) markRead.mutate(n.id);
     setOpen(false);
-    if (n.related_quiz_id) {
-      const path =
-        user?.role === "STUDENT"
-          ? `/student/quizzes/${n.related_quiz_id}/take`
-          : `/teacher/quizzes/${n.related_quiz_id}`;
-      navigate(path);
-    }
   };
 
   return (

@@ -46,3 +46,4 @@ docker-compose.override.yml
 # DB dumps
 *.sql.gz
 *.dump
+config.bat

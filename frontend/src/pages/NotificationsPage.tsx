@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { api } from "../api";
 import type { NotificationRead, PaginatedNotifications } from "../api";
@@ -14,7 +14,6 @@ const PAGE_SIZE = 15;
 
 export function NotificationsPage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
 
@@ -64,13 +63,6 @@ export function NotificationsPage() {
 
   const handleClick = (n: NotificationRead) => {
     if (n.read_at === null) markRead.mutate(n.id);
-    if (n.related_quiz_id) {
-      const path =
-        user?.role === "STUDENT"
-          ? `/student/quizzes/${n.related_quiz_id}/take`
-          : `/teacher/quizzes/${n.related_quiz_id}`;
-      navigate(path);
-    }
   };
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;

@@ -15,6 +15,7 @@ export function TeacherQuizCreatePage() {
   const [duration, setDuration] = useState(30);
   const [passingScore, setPassingScore] = useState(60);
   const [isAdaptive, setIsAdaptive] = useState(true);
+  const [scheduledAt, setScheduledAt] = useState("");
 
   const create = useMutation({
     mutationFn: (payload: QuizCreatePayload) =>
@@ -35,6 +36,7 @@ export function TeacherQuizCreatePage() {
       duration_minutes: duration,
       passing_score: passingScore,
       is_adaptive: isAdaptive,
+      scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
     });
   };
 
@@ -121,6 +123,19 @@ export function TeacherQuizCreatePage() {
             onChange={(e) => setIsAdaptive(e.target.checked)}
           />
           Adaptive difficulty (AI picks next question based on performance)
+        </label>
+
+        <label className="block">
+          <span className="text-sm text-slate-700">
+            Schedule date &amp; time{" "}
+            <span className="text-slate-400">(optional — students are notified when set)</span>
+          </span>
+          <input
+            type="datetime-local"
+            className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+            value={scheduledAt}
+            onChange={(e) => setScheduledAt(e.target.value)}
+          />
         </label>
 
         {create.isError && (

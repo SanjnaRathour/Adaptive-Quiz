@@ -87,3 +87,12 @@ class QuestionStudentRead(BaseModel):
     difficulty: Difficulty
     points: int
     options: list[QuestionOptionStudentRead]
+
+
+class DifficultyHintRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class DifficultyHintResponse(BaseModel):
+    difficulty: Difficulty
+    ai_used: bool

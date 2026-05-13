@@ -1,8 +1,11 @@
 """Adaptive difficulty engine.
 
-Rule-based: maintains a per-attempt ability estimate in [0, 1] using an
-exponential moving average over difficulty-weighted outcomes, then picks the
-next question whose difficulty matches the student's current ability band.
+Maintains a per-attempt ability estimate in [0, 1] using an exponential
+moving average (EMA) over difficulty-weighted outcomes.  The EMA is the
+source of truth for ability; the *difficulty selection* step is handed off
+to Gemini (see services/ai_difficulty.py) so that an AI algorithm decides
+what tier to target next.  If AI is unavailable the EMA-derived tier is
+used as a fallback, keeping the engine fully self-contained.
 
 Kept fully pure (no DB writes) so it's trivially unit-testable; the attempt
 service is responsible for persisting any updates.
@@ -85,15 +88,18 @@ def select_next_question(
     candidates: Iterable[Question],
     *,
     ability: float,
+    difficulty_override: Difficulty | None = None,
 ) -> Question | None:
     """Pick the next question for a given ability from the unanswered pool.
 
-    Strategy: bucket candidates by difficulty, pick the first available in the
-    target tier; if empty, fall back to the next-closest tier. Within a tier we
-    take the first by `order_index, created_at` (the caller is expected to pass
-    the candidates already sorted that way).
+    If `difficulty_override` is provided (e.g. from the AI difficulty service)
+    it is used as the target tier instead of the EMA-derived one.  The
+    fallback order still applies when the target tier has no remaining questions.
+
+    Within a tier questions are taken in `order_index, created_at` order
+    (the caller is expected to pass candidates already sorted that way).
     """
-    target = target_difficulty(ability)
+    target = difficulty_override if difficulty_override is not None else target_difficulty(ability)
     buckets = _bucket(candidates)
     for tier in _FALLBACK_ORDER[target]:
         bucket = buckets.at(tier)

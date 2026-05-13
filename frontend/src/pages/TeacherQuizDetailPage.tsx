@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import type {
   Difficulty,
+  DifficultyHintResponse,
   QuestionCreatePayload,
   QuestionTeacherRead,
   QuestionType,
@@ -170,7 +171,7 @@ export function TeacherQuizDetailPage() {
   );
 }
 
-function AddQuestionForm({ quizId }: { quizId: string }) {
+export function AddQuestionForm({ quizId }: { quizId: string }) {
   const queryClient = useQueryClient();
   const [type, setType] = useState<QuestionType>("MULTIPLE_CHOICE");
   const [text, setText] = useState("");
@@ -186,6 +187,27 @@ function AddQuestionForm({ quizId }: { quizId: string }) {
     { text: "", is_correct: false },
     { text: "", is_correct: false },
   ]);
+  const [aiSuggestion, setAiSuggestion] = useState<Difficulty | null>(null);
+  const [isSuggesting, setIsSuggesting] = useState(false);
+
+  const fetchSuggestion = async (questionText: string) => {
+    if (questionText.trim().length < 2) return;
+    setIsSuggesting(true);
+    try {
+      const hint = await api<DifficultyHintResponse>(
+        "/quizzes/questions/suggest-difficulty",
+        { method: "POST", json: { text: questionText.trim() } },
+      );
+      if (hint.ai_used) {
+        setAiSuggestion(hint.difficulty);
+        setDifficulty(hint.difficulty);
+      }
+    } catch {
+      // silently ignore — teacher still has the manual dropdown
+    } finally {
+      setIsSuggesting(false);
+    }
+  };
 
   const reset = () => {
     setText("");
@@ -193,6 +215,7 @@ function AddQuestionForm({ quizId }: { quizId: string }) {
     setShortAnswer("");
     setPoints(1);
     setDifficulty("MEDIUM");
+    setAiSuggestion(null);
     setOptions([
       { text: "", is_correct: true },
       { text: "", is_correct: false },
@@ -299,11 +322,24 @@ function AddQuestionForm({ quizId }: { quizId: string }) {
           </select>
         </label>
         <label className="block">
-          <span className="text-sm text-slate-700">Difficulty</span>
+          <span className="text-sm text-slate-700 flex items-center gap-2">
+            Difficulty
+            {isSuggesting && (
+              <span className="text-xs text-indigo-500 animate-pulse">AI thinking…</span>
+            )}
+            {!isSuggesting && aiSuggestion && (
+              <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                AI set
+              </span>
+            )}
+          </span>
           <select
             className="mt-1 w-full rounded border border-slate-300 px-2 py-2 text-sm"
             value={difficulty}
-            onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+            onChange={(e) => {
+              setDifficulty(e.target.value as Difficulty);
+              setAiSuggestion(null);
+            }}
           >
             <option value="EASY">Easy</option>
             <option value="MEDIUM">Medium</option>
@@ -330,6 +366,7 @@ function AddQuestionForm({ quizId }: { quizId: string }) {
           rows={2}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onBlur={(e) => fetchSuggestion(e.target.value)}
           required
         />
       </label>

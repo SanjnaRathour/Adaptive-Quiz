@@ -154,6 +154,11 @@ def next_question(
     attempt = _load_owned_attempt(db, attempt_id, student)
     if attempt.status != AttemptStatus.IN_PROGRESS:
         raise HTTPException(status_code=400, detail="Attempt is not in progress")
+    quiz = quiz_svc.get_quiz(db, attempt.quiz_id)
+    if quiz and attempt_svc.is_time_expired(attempt, quiz):
+        attempt_svc.abandon_attempt(db, attempt)
+        notification_svc.notify_attempt_abandoned(db, student_id=student.id, quiz=quiz)
+        raise HTTPException(status_code=410, detail="Time's up — attempt abandoned")
     q = attempt_svc.next_unanswered_question(db, attempt)
     total = attempt_svc.total_questions(db, attempt.quiz_id)
     remaining = total - len(attempt_svc.answered_question_ids(attempt))
@@ -187,6 +192,11 @@ def submit_answer(
     student: User = Depends(require_student),
 ) -> AnswerResult:
     attempt = _load_owned_attempt(db, attempt_id, student)
+    quiz = quiz_svc.get_quiz(db, attempt.quiz_id)
+    if quiz and attempt_svc.is_time_expired(attempt, quiz):
+        attempt_svc.abandon_attempt(db, attempt)
+        notification_svc.notify_attempt_abandoned(db, student_id=student.id, quiz=quiz)
+        raise HTTPException(status_code=410, detail="Time's up — attempt abandoned")
     try:
         answer, was_new = attempt_svc.submit_answer(db, attempt, payload)
     except ValueError as exc:

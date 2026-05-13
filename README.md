@@ -1,8 +1,9 @@
 # Adaptive Quiz
 
-Web-based quiz platform that adapts question difficulty in real time using a
-rule-based exponential-moving-average engine, and generates AI tutor feedback
-on wrong answers using **Google Gemini** (free tier).
+Web-based quiz platform that adapts question difficulty in real time using
+**Google Gemini** to decide the next question difficulty based on the student's
+performance history, backed by an exponential-moving-average ability tracker,
+and generates AI tutor feedback on wrong answers — both powered by **Google Gemini** (free tier).
 
 Roles: **students** take quizzes and view per-difficulty analytics; **teachers**
 author and publish quizzes, manage questions, and inspect per-quiz score
@@ -18,7 +19,7 @@ and a React (Vite + Tailwind v4) frontend.
 | Auth     | JWT (access + refresh) · bcrypt password hashing    |
 | Database | PostgreSQL 16 (via Docker)                          |
 | Frontend | React 18 · TypeScript (strict) · Vite · Tailwind v4 · TanStack Query · React Router 6 |
-| Tests    | pytest + pytest-cov (66 tests, 95% coverage) · ruff lint · `tsc -b` |
+| Tests    | pytest + pytest-cov (91 backend tests, 95% coverage) · 14 frontend Vitest tests · ruff lint · `tsc -b` |
 
 ## Project layout
 
@@ -43,8 +44,8 @@ frontend/
     api.ts              fetch wrapper + TS types mirroring backend schemas
     auth.tsx            auth context (JWT in localStorage with silent refresh)
 docker-compose.yml             Postgres + backend + frontend + (optional) adminer
-Adaptive_Quiz_Project_Report.docx   Project report (64 pages)
-Adaptive_Quiz_Presentation.pptx     22-slide presentation deck
+Adaptive_Quiz_Project_Report.docx   Project report (80 pages)
+Adaptive_Quiz_Presentation.pptx     Presentation deck
 ```
 
 ## Reproducing from the submission zip
@@ -150,7 +151,7 @@ don't get the AI tutor callout on wrong answers.
 
 ```bash
 cd backend
-.venv/bin/pytest                            # 66 tests
+.venv/bin/pytest                            # 91 tests
 .venv/bin/pytest --cov=app --cov-report=term-missing   # 95% coverage
 .venv/bin/ruff check app/                   # lint
 ```
@@ -160,7 +161,14 @@ first run and rolled back per-test (savepoint pattern), so they don't pollute
 your dev data. AI feedback tests inject a fake Gemini client via a module-level
 session factory, so they don't burn quota.
 
-Frontend type-check + build: `cd frontend && npm run lint && npm run build`
+Frontend tests + type-check + build:
+
+```bash
+cd frontend
+npm run test        # 14 Vitest tests (PasswordInput, AddQuestionForm, TeacherQuizCreatePage)
+npm run lint        # tsc -b --noEmit + eslint
+npm run build       # ~275 KB JS bundle
+```
 
 ## UI features (frontend)
 
@@ -193,10 +201,12 @@ Frontend type-check + build: `cd frontend && npm run lint && npm run build`
 - Outcomes are calibrated so that *getting an EASY question right* is weak
   evidence of ability and *getting a HARD question wrong* is weak evidence
   of low ability — the asymmetry mirrors how real assessments work.
-- Next-question selection draws from the unanswered, non-soft-deleted pool
-  whose difficulty matches the current ability tier (`<0.4` EASY,
-  `<0.75` MEDIUM, else HARD), with graceful fallback when the target tier
-  is empty.
+- **Next-question difficulty is decided by Gemini** (`services/ai_difficulty.py`):
+  the last 6 answers (difficulty + correct/wrong) and the current ability score
+  are sent to `gemini-2.5-flash`, which replies with `EASY`, `MEDIUM`, or `HARD`.
+  The EMA-derived tier is used as a fallback when AI is unavailable.
+- Questions are then drawn from the unanswered, non-soft-deleted pool matching
+  the AI-selected tier, with graceful fallback to adjacent tiers when empty.
 - For wrong answers we fire a FastAPI `BackgroundTask` that calls Gemini
   with a small prompt (question, student's answer, correct answer, teacher's
   note if any) and writes the response to `answers.ai_feedback`. The student
@@ -238,6 +248,7 @@ Frontend type-check + build: `cd frontend && npm run lint && npm run build`
 | `POST /api/v1/attempts/{id}/complete`          | student (own attempt) |
 | `GET  /api/v1/attempts/{id}/results`           | student (own) / teacher / admin |
 | `GET  /api/v1/analytics/me`                    | student     |
+| `POST /api/v1/quizzes/questions/suggest-difficulty` | teacher (AI difficulty hint for new question) |
 | `GET  /api/v1/analytics/overview`              | teacher     |
 | `GET  /api/v1/analytics/quizzes/{id}`          | teacher (own quiz) |
 | `GET  /api/v1/notifications`                   | any user (paginated) |
@@ -250,9 +261,9 @@ Full schemas at `/docs` (OpenAPI / Swagger UI).
 
 | File                                       | Notes |
 | ------------------------------------------ | ----- |
-| `Adaptive_Quiz_Project_Report.docx`        | Full project report — 64 pages, 29 figures (DFDs, UML, ER, sequence, activity, wireframes, screenshots). |
+| `Adaptive_Quiz_Project_Report.docx`        | Full project report — 80 pages, 29 figures (DFDs, UML, ER, sequence, activity, wireframes, screenshots). |
 | `Adaptive_Quiz_Project_Report.pdf`         | PDF export of the report — same content, ready for viewing without Word. |
-| `Adaptive_Quiz_Presentation.pptx`          | 22-slide deck with title, agenda, architecture diagrams, technical detail, and comparison table. |
+| `Adaptive_Quiz_Presentation.pptx`          | Presentation deck covering title, agenda, architecture diagrams, technical detail, and comparison table. |
 
 ## Notes & tradeoffs
 
