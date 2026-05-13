@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -10,8 +10,25 @@ from app.models.question import Question, QuestionOption
 from app.models.quiz import Quiz
 from app.models.user import User
 from app.schemas.attempt import AnswerSubmit, AttemptResultDetail, AttemptResults
-from app.services import adaptive
+from app.services import adaptive, ai_difficulty
 from app.services.grading import correct_answer_text, grade_answer
+
+
+def is_time_expired(attempt: QuizAttempt, quiz: Quiz) -> bool:
+    """True if the quiz duration has elapsed since the attempt started."""
+    if attempt.started_at is None or quiz.duration_minutes is None:
+        return False
+    deadline = attempt.started_at + timedelta(minutes=quiz.duration_minutes)
+    return datetime.now(timezone.utc) > deadline
+
+
+def abandon_attempt(db: Session, attempt: QuizAttempt) -> QuizAttempt:
+    """Mark an attempt ABANDONED and persist."""
+    attempt.status = AttemptStatus.ABANDONED
+    attempt.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(attempt)
+    return attempt
 
 
 def _snapshot_questions(db: Session, attempt: QuizAttempt) -> None:
@@ -57,7 +74,10 @@ def start_attempt(db: Session, student: User, quiz: Quiz) -> QuizAttempt:
     """
     existing = _existing_in_progress(db, student_id=student.id, quiz_id=quiz.id)
     if existing:
-        return existing
+        if is_time_expired(existing, quiz):
+            abandon_attempt(db, existing)
+        else:
+            return existing
 
     attempt = QuizAttempt(
         quiz_id=quiz.id,
@@ -135,7 +155,23 @@ def next_unanswered_question(db: Session, attempt: QuizAttempt) -> Question | No
 
     quiz = db.get(Quiz, attempt.quiz_id)
     if quiz and quiz.is_adaptive:
-        return adaptive.select_next_question(candidates, ability=attempt.ability_estimate)
+        # Build the answer history the AI needs to reason over.
+        recent = [
+            {
+                "difficulty": a.difficulty_at_answer.value,
+                "correct": bool(a.is_correct),
+            }
+            for a in sorted(attempt.answers, key=lambda x: x.created_at)
+        ]
+        ema_fallback = adaptive.target_difficulty(attempt.ability_estimate)
+        ai_target = ai_difficulty.recommend_difficulty(
+            recent, attempt.ability_estimate, ema_fallback
+        )
+        return adaptive.select_next_question(
+            candidates,
+            ability=attempt.ability_estimate,
+            difficulty_override=ai_target,
+        )
     return candidates[0]
 
 

@@ -7,6 +7,8 @@ from app.api.deps import get_current_user, require_teacher
 from app.core.database import get_db
 from app.models.user import User
 from app.schemas.question import (
+    DifficultyHintRequest,
+    DifficultyHintResponse,
     QuestionCreate,
     QuestionTeacherRead,
     QuestionUpdate,
@@ -26,6 +28,8 @@ def create(
     teacher: User = Depends(require_teacher),
 ) -> QuizSummary:
     quiz = quiz_svc.create_quiz(db, teacher, payload)
+    if quiz.scheduled_at is not None:
+        notification_svc.notify_quiz_scheduled(db, quiz)
     return QuizSummary.model_validate(quiz).model_copy(update={"question_count": 0})
 
 
@@ -71,7 +75,10 @@ def update(
     quiz = _load_quiz_or_404(db, quiz_id)
     if not quiz_svc.user_can_edit_quiz(quiz, teacher):
         raise HTTPException(status_code=403, detail="Not your quiz")
+    was_unscheduled = quiz.scheduled_at is None
     quiz = quiz_svc.update_quiz(db, quiz, payload)
+    if was_unscheduled and quiz.scheduled_at is not None:
+        notification_svc.notify_quiz_scheduled(db, quiz)
     count = quiz_svc.count_questions(db, quiz_id)
     return QuizSummary.model_validate(quiz).model_copy(update={"question_count": count})
 
@@ -148,6 +155,25 @@ def list_questions(
         for q in quiz.questions
         if q.deleted_at is None
     ]
+
+
+@router.post(
+    "/questions/suggest-difficulty",
+    response_model=DifficultyHintResponse,
+    summary="AI-suggest a difficulty for a question",
+    description=(
+        "Send question text to Gemini and get back EASY / MEDIUM / HARD. "
+        "Returns ai_used=false and falls back to MEDIUM when AI is disabled."
+    ),
+)
+def suggest_difficulty(
+    payload: DifficultyHintRequest,
+    _: User = Depends(require_teacher),
+) -> DifficultyHintResponse:
+    from app.services import ai_difficulty
+
+    difficulty, ai_used = ai_difficulty.suggest_question_difficulty(payload.text.strip())
+    return DifficultyHintResponse(difficulty=difficulty, ai_used=ai_used)
 
 
 @router.patch("/questions/{question_id}", response_model=QuestionTeacherRead)

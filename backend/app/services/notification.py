@@ -50,6 +50,53 @@ def notify_quiz_published(db: Session, quiz: Quiz) -> int:
     return len(students)
 
 
+def notify_quiz_scheduled(db: Session, quiz: Quiz) -> int:
+    """Broadcast a QUIZ_SCHEDULED notification to all active students.
+
+    Returns the number of notifications created.
+    """
+    from datetime import timezone
+
+    scheduled = quiz.scheduled_at
+    if scheduled is not None and scheduled.tzinfo is None:
+        scheduled = scheduled.replace(tzinfo=timezone.utc)
+    date_str = scheduled.strftime("%b %d, %Y at %H:%M UTC") if scheduled else "soon"
+    students = db.scalars(
+        select(User).where(User.role == UserRole.STUDENT, User.is_active.is_(True))
+    ).all()
+    for s in students:
+        _create(
+            db,
+            user_id=s.id,
+            type_=NotificationType.QUIZ_SCHEDULED,
+            title=f"Quiz scheduled: {quiz.title}",
+            message=f"A new {quiz.subject} quiz is scheduled for {date_str}.",
+            related_quiz_id=quiz.id,
+        )
+    db.commit()
+    return len(students)
+
+
+def notify_attempt_abandoned(
+    db: Session, *, student_id: uuid.UUID, quiz: Quiz
+) -> Notification:
+    n = _create(
+        db,
+        user_id=student_id,
+        type_=NotificationType.SYSTEM,
+        title=f"Attempt timed out: {quiz.title}",
+        message=(
+            f"Your attempt for \"{quiz.title}\" was automatically abandoned "
+            f"because the {quiz.duration_minutes}-minute time limit elapsed. "
+            "Your answers up to that point have been saved."
+        ),
+        related_quiz_id=quiz.id,
+    )
+    db.commit()
+    db.refresh(n)
+    return n
+
+
 def notify_attempt_completed(
     db: Session, *, student_id: uuid.UUID, quiz: Quiz, score: float | None
 ) -> Notification:

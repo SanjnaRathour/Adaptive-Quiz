@@ -197,6 +197,7 @@ export interface QuizCreatePayload {
   is_adaptive?: boolean;
   duration_minutes?: number;
   passing_score?: number;
+  scheduled_at?: string | null;
 }
 
 export interface QuestionOptionPayload {
@@ -214,6 +215,11 @@ export interface QuestionCreatePayload {
   points?: number;
   order_index?: number;
   options: QuestionOptionPayload[];
+}
+
+export interface DifficultyHintResponse {
+  difficulty: Difficulty;
+  ai_used: boolean;
 }
 
 export interface ScoreBucket {

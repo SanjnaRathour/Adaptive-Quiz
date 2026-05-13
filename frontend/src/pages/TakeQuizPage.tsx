@@ -8,6 +8,7 @@ import type {
   AttemptRead,
   Difficulty,
   NextQuestionResponse,
+  PaginatedAttempts,
   QuestionStudentRead,
   QuizSummary,
 } from "../api";
@@ -20,20 +21,72 @@ const FEEDBACK_MS = 1100;
 // Top-level page: load attempt + quiz, branch by quiz.is_adaptive.
 // ---------------------------------------------------------------------------
 
+function useCountdown(attempt: AttemptRead | null, durationMinutes: number | undefined) {
+  const [secsLeft, setSecsLeft] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!attempt?.started_at || !durationMinutes) return;
+    const deadline = new Date(attempt.started_at).getTime() + durationMinutes * 60_000;
+    const tick = () => {
+      const diff = Math.floor((deadline - Date.now()) / 1000);
+      setSecsLeft(Math.max(0, diff));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [attempt?.started_at, durationMinutes]);
+
+  return secsLeft;
+}
+
+function CountdownTimer({ secsLeft }: { secsLeft: number }) {
+  const mins = Math.floor(secsLeft / 60);
+  const secs = secsLeft % 60;
+  const urgent = secsLeft <= 60;
+  return (
+    <div
+      className={`flex items-center gap-1.5 text-sm font-mono font-semibold px-3 py-1 rounded-full border ${
+        urgent
+          ? "bg-rose-50 border-rose-300 text-rose-700 animate-pulse"
+          : "bg-slate-50 border-slate-200 text-slate-700"
+      }`}
+    >
+      ⏱ {mins}:{String(secs).padStart(2, "0")}
+    </div>
+  );
+}
+
 export function TakeQuizPage() {
   const { quizId } = useParams<{ quizId: string }>();
   const navigate = useNavigate();
   const [attempt, setAttempt] = useState<AttemptRead | null>(null);
+  const startedRef = useRef(false);
+
+  // Check for an existing IN_PROGRESS attempt for this quiz BEFORE calling
+  // POST. The POST is idempotent (backend returns the existing one if found),
+  // but we need to know up-front so we can: (a) show "Resuming" vs "Starting"
+  // in the loading state, and (b) only call POST once the check is done.
+  const { data: inProgressData, isSuccess: progressChecked } = useQuery({
+    queryKey: ["my-attempts", "IN_PROGRESS"],
+    queryFn: () =>
+      api<PaginatedAttempts>("/attempts?status=IN_PROGRESS&page_size=100"),
+    enabled: !!quizId,
+    staleTime: 0,
+  });
+
+  const isResuming =
+    inProgressData?.items.some((a) => a.quiz_id === quizId) ?? false;
 
   useEffect(() => {
-    if (!quizId) return;
+    if (!quizId || !progressChecked || startedRef.current) return;
+    startedRef.current = true;
     api<AttemptRead>(`/quizzes/${quizId}/attempts`, { method: "POST" })
       .then(setAttempt)
       .catch((err) => {
         alert(err.message ?? "Failed to start quiz");
         navigate("/student");
       });
-  }, [quizId, navigate]);
+  }, [quizId, progressChecked, navigate]);
 
   const { data: quiz } = useQuery({
     queryKey: ["quiz", quizId],
@@ -41,13 +94,34 @@ export function TakeQuizPage() {
     enabled: !!quizId,
   });
 
-  if (!attempt || !quiz)
-    return <p className="text-slate-500">Loading attempt…</p>;
+  const secsLeft = useCountdown(attempt, quiz?.duration_minutes);
 
-  return quiz.is_adaptive ? (
-    <AdaptiveQuiz attempt={attempt} />
-  ) : (
-    <LinearQuiz attempt={attempt} />
+  if (!attempt || !quiz)
+    return (
+      <p className="text-slate-500">
+        {progressChecked && isResuming ? "Resuming your attempt…" : "Loading attempt…"}
+      </p>
+    );
+
+  return (
+    <>
+      {/* Timer bar */}
+      <div className="flex items-center justify-between mb-4">
+        <span className="text-sm text-slate-500">{quiz.title}</span>
+        {secsLeft !== null && <CountdownTimer secsLeft={secsLeft} />}
+      </div>
+
+      {isResuming && (
+        <div className="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          You already have an attempt in progress for this quiz — resuming where you left off.
+        </div>
+      )}
+      {quiz.is_adaptive ? (
+        <AdaptiveQuiz attempt={attempt} secsLeft={secsLeft} />
+      ) : (
+        <LinearQuiz attempt={attempt} secsLeft={secsLeft} />
+      )}
+    </>
   );
 }
 
@@ -56,7 +130,7 @@ export function TakeQuizPage() {
 // No Prev/Next, no jump-to grid. Student can submit early with a warning.
 // ---------------------------------------------------------------------------
 
-function AdaptiveQuiz({ attempt }: { attempt: AttemptRead }) {
+function AdaptiveQuiz({ attempt, secsLeft }: { attempt: AttemptRead; secsLeft: number | null }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
@@ -117,7 +191,21 @@ function AdaptiveQuiz({ attempt }: { attempt: AttemptRead }) {
     },
   });
 
+  // When timer hits 0 the backend will abandon the attempt on the next request.
+  // Redirect to attempts list so the student sees the ABANDONED status.
+  useEffect(() => {
+    if (secsLeft === 0) navigate("/student/attempts");
+  }, [secsLeft, navigate]);
+
   if (!nq) return <p className="text-slate-500">Loading…</p>;
+
+  if (secsLeft === 0)
+    return (
+      <div className="bg-rose-50 border border-rose-200 rounded-xl px-5 py-6 text-center space-y-2">
+        <p className="text-lg font-semibold text-rose-700">Time's up!</p>
+        <p className="text-sm text-rose-600">Your attempt has been automatically abandoned. Redirecting…</p>
+      </div>
+    );
 
   const total = totalRef.current ?? nq.remaining;
   const answered = Math.max(0, total - nq.remaining);
@@ -236,7 +324,7 @@ function AdaptiveQuiz({ attempt }: { attempt: AttemptRead }) {
 // student navigates freely with Prev/Next, can re-answer until submit.
 // ---------------------------------------------------------------------------
 
-function LinearQuiz({ attempt }: { attempt: AttemptRead }) {
+function LinearQuiz({ attempt, secsLeft }: { attempt: AttemptRead; secsLeft: number | null }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [items, setItems] = useState<AttemptQuestionItem[] | null>(null);
@@ -311,9 +399,21 @@ function LinearQuiz({ attempt }: { attempt: AttemptRead }) {
     },
   });
 
+  useEffect(() => {
+    if (secsLeft === 0) navigate("/student/attempts");
+  }, [secsLeft, navigate]);
+
   if (!items) return <p className="text-slate-500">Loading…</p>;
   if (items.length === 0)
     return <p className="text-slate-500">This quiz has no active questions.</p>;
+
+  if (secsLeft === 0)
+    return (
+      <div className="bg-rose-50 border border-rose-200 rounded-xl px-5 py-6 text-center space-y-2">
+        <p className="text-lg font-semibold text-rose-700">Time's up!</p>
+        <p className="text-sm text-rose-600">Your attempt has been automatically abandoned. Redirecting…</p>
+      </div>
+    );
 
   const item = items[idx];
   const q = item.question;

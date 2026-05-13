@@ -22,8 +22,6 @@ build/
 .vite/
 
 # Env files
-.env
-.env.local
 .env.*.local
 !.env.example
 
@@ -46,3 +44,4 @@ docker-compose.override.yml
 # DB dumps
 *.sql.gz
 *.dump
+config.bat

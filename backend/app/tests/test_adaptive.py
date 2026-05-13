@@ -94,3 +94,55 @@ def test_select_next_question_falls_back_when_target_empty() -> None:
 
 def test_select_next_question_returns_none_for_empty_pool() -> None:
     assert select_next_question([], ability=0.5) is None
+
+
+# ---------------------------------------------------------------------------
+# difficulty_override — AI-supplied tier bypasses EMA
+# ---------------------------------------------------------------------------
+
+def test_select_next_question_override_hard_ignores_low_ability() -> None:
+    """AI says HARD even though ability is low — override wins."""
+    pool = [
+        FakeQ("e1", Difficulty.EASY),
+        FakeQ("m1", Difficulty.MEDIUM),
+        FakeQ("h1", Difficulty.HARD),
+    ]
+    chosen = select_next_question(pool, ability=0.1, difficulty_override=Difficulty.HARD)
+    assert chosen.id == "h1"
+
+
+def test_select_next_question_override_easy_ignores_high_ability() -> None:
+    """AI says EASY even though ability is high — override wins."""
+    pool = [
+        FakeQ("e1", Difficulty.EASY),
+        FakeQ("m1", Difficulty.MEDIUM),
+        FakeQ("h1", Difficulty.HARD),
+    ]
+    chosen = select_next_question(pool, ability=0.9, difficulty_override=Difficulty.EASY)
+    assert chosen.id == "e1"
+
+
+def test_select_next_question_override_medium_ignores_high_ability() -> None:
+    pool = [FakeQ("m1", Difficulty.MEDIUM), FakeQ("h1", Difficulty.HARD)]
+    chosen = select_next_question(pool, ability=0.9, difficulty_override=Difficulty.MEDIUM)
+    assert chosen.id == "m1"
+
+
+def test_select_next_question_override_none_falls_back_to_ability() -> None:
+    """Explicit None override → uses EMA-derived tier as before."""
+    pool = [FakeQ("e1", Difficulty.EASY), FakeQ("m1", Difficulty.MEDIUM)]
+    chosen = select_next_question(pool, ability=0.5, difficulty_override=None)
+    assert chosen.id == "m1"  # ability 0.5 → MEDIUM tier
+
+
+def test_select_next_question_override_tier_empty_uses_fallback_order() -> None:
+    """Override asks for HARD but pool has none — falls back to MEDIUM then EASY."""
+    pool = [FakeQ("e1", Difficulty.EASY), FakeQ("m1", Difficulty.MEDIUM)]
+    chosen = select_next_question(pool, ability=0.5, difficulty_override=Difficulty.HARD)
+    assert chosen.id == "m1"  # HARD fallback goes HARD→MEDIUM→EASY
+
+
+def test_select_next_question_override_all_tiers_empty_except_easy() -> None:
+    pool = [FakeQ("e1", Difficulty.EASY)]
+    chosen = select_next_question(pool, ability=0.5, difficulty_override=Difficulty.HARD)
+    assert chosen.id == "e1"
